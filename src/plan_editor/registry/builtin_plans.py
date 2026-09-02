@@ -128,6 +128,7 @@ BUILTIN_NODES: list[NodeSchema] = [
         node_id="for_each",
         title="for each",
         category="loop",
+        hidden=True,
         inputs=[PortSpec("in", "plan"), PortSpec("body", "plan")],
         outputs=[PortSpec("out", "plan")],
         params={"variable": "_val", "values": "0, 1, 2", "delay": 0.0},
