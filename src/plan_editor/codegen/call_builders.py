@@ -26,6 +26,23 @@ def _node_value(node) -> str:
         if not parts:
             return "[]"
         return parts[0] if len(parts) == 1 else "[" + ", ".join(parts) + "]"
+    if nid == "detector_device":
+        parts, i = [], 0
+        while f"detector_{i}" in node.params:
+            v = str(node.params[f"detector_{i}"]).strip()
+            if v:
+                parts.append(v)
+            i += 1
+        return parts[0] if len(parts) == 1 else "[" + ", ".join(parts) + "]" if parts else "[]"
+    if nid == "motor_device":
+        # When used as a plain value (e.g. wired to a scan motor port), emit the motor name(s).
+        parts, i = [], 0
+        while f"motor_{i}" in node.params:
+            v = str(node.params[f"motor_{i}"]).strip()
+            if v:
+                parts.append(v)
+            i += 1
+        return parts[0] if len(parts) == 1 else "[" + ", ".join(parts) + "]" if parts else "motor"
     if nid == "string_input":
         return repr(str(node.params.get("value", "")))
     if nid == "array_input":
@@ -41,6 +58,33 @@ def _node_value(node) -> str:
             i += 1
         return "[" + ", ".join(parts) + "]"
     return str(node.params.get("name", node.schema.title)).strip()
+
+
+def _device_port_mv_args(src_node) -> list[str]:
+    """Extract interleaved (motor, position) arg tokens from a motor_device or shutter_device node."""
+    nid = src_node.schema.node_id
+    result: list[str] = []
+    if nid in ("motor_device", "shutter_device"):
+        key0 = "motor" if nid == "motor_device" else "shutter"
+        i = 0
+        while f"{key0}_{i}" in src_node.params:
+            dev = str(src_node.params[f"{key0}_{i}"]).strip()
+            pos = src_node.params.get(f"pos_{i}", 0)
+            if dev:
+                result += [dev, str(pos)]
+            i += 1
+    elif nid == "motor_device_rel":
+        i = 0
+        while f"motor_{i}" in src_node.params:
+            dev = str(src_node.params[f"motor_{i}"]).strip()
+            delta = src_node.params.get(f"delta_{i}", 0)
+            if dev:
+                result += [dev, str(delta)]
+            i += 1
+    else:
+        # Generic value node — treat whole value as a single positional arg
+        result.append(_node_value(src_node))
+    return result
 
 
 def _node_value_from_port(src_port) -> str:
@@ -148,29 +192,16 @@ def _build_call(node) -> str:
             return "pass  # custom_call: func port not connected"
         return f"{func}({all_args})" if all_args else f"{func}()"
 
-    if nid == "mv":
-        positions_src = _get_wired_node(node, "positions")
-        if positions_src is not None:
-            pos_expr = _node_value(positions_src)
-            motors = [str(p[k]).strip() for k in sorted(p)
-                      if k.startswith("motor_") and str(p[k]).strip()]
-            args = ", ".join(f"{m}, {pos_expr}" for m in motors) if motors else f"motor, {pos_expr}"
-        else:
-            pairs = _extract_pairs(p, "motor", "pos")
-            args  = ", ".join(f"{m}, {v}" for m, v in pairs)
-        return f"bps.mv({args})"
-
-    if nid == "mvr":
-        positions_src = _get_wired_node(node, "positions")
-        if positions_src is not None:
-            pos_expr = _node_value(positions_src)
-            motors = [str(p[k]).strip() for k in sorted(p)
-                      if k.startswith("motor_") and str(p[k]).strip()]
-            args = ", ".join(f"{m}, {pos_expr}" for m in motors) if motors else f"motor, {pos_expr}"
-        else:
-            pairs = _extract_pairs(p, "motor", "delta")
-            args  = ", ".join(f"{m}, {d}" for m, d in pairs)
-        return f"bps.mvr({args})"
+    if nid in ("mv", "mvr"):
+        fn = "bps.mv" if nid == "mv" else "bps.mvr"
+        # Collect args from all wired device value ports (port 0 is the plan "in" port)
+        arg_tokens: list[str] = []
+        for port in node.input_ports[1:]:
+            if port.port_type == "value" and port.wires:
+                arg_tokens.extend(_device_port_mv_args(port.wires[0].src.node))
+        if not arg_tokens:
+            arg_tokens = ["motor", "0"]  # unconnected fallback
+        return f"{fn}({', '.join(arg_tokens)})"
 
     if nid == "sleep":
         return f"bps.sleep({p['delay']})"

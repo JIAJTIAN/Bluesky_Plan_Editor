@@ -28,3 +28,4 @@ class NodeSchema:
     hidden:              bool = False  # True → not shown in palette (auto-created nodes)
     title_param:         str  = ""    # if set, use params[title_param] as the header title
     inline_pairs:        bool = False  # True → render each param_pair as one row (two side-by-side fields)
+    expand_port_name:    str  = ""    # if set, expanded ports use this label instead of "arg N"

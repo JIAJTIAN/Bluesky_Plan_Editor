@@ -15,6 +15,7 @@ CATEGORY_ICON: dict[str, str] = {
     "flow":    "⇄",
     "custom":  "✦",
     "output":  "▣",
+    "device":  "⬟",
 }
 
 # Accent colour for each category label
@@ -28,6 +29,7 @@ CATEGORY_COLOR: dict[str, str] = {
     "flow":    "#f87171",   # red
     "custom":  "#c084fc",   # purple
     "output":  "#94a3b8",   # slate
+    "device":  "#34d399",   # emerald green
 }
 
 # Fallbacks for unknown categories

@@ -48,6 +48,7 @@ HEADER_COLORS   = {
     "control": (QColor("#18181f"), QColor("#94a3b8")),
     "custom":  (QColor("#1a0f2e"), QColor("#c084fc")),
     "output":  (QColor("#1a0f2e"), QColor("#c084fc")),
+    "device":  (QColor("#0a2a1a"), QColor("#34d399")),
 }
 
 # ── fonts ─────────────────────────────────────────────────────────────────────
@@ -264,7 +265,9 @@ class BaseNode(QGraphicsItem):
     def _add_port(self):
         ptype = self.schema.expand_port_type
         n_same = sum(1 for p in self.input_ports if p.port_type == ptype)
-        if ptype == "value":
+        if self.schema.expand_port_name:
+            name = self.schema.expand_port_name
+        elif ptype == "value":
             # count only the expandable slots (subtract fixed schema value ports)
             n_schema_fixed = sum(1 for s in self.schema.inputs if s.port_type == ptype)
             name = f"arg {n_same - n_schema_fixed}"
