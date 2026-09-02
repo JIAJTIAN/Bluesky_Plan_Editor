@@ -156,6 +156,22 @@ def _gen_node(node, indent: int, visited: frozenset) -> list[str]:
     nid = node.schema.node_id
     p   = _resolve_params(node)
 
+    # ── if / else block ───────────────────────────────────────────────────────
+    if nid == "if_block":
+        condition = str(p.get("condition", "True")).strip()
+        lines: list[str] = []
+        if node.input_ports and node.input_ports[0].wires:
+            lines.extend(_gen_item(node.input_ports[0].wires[0].src.node, indent, visited))
+        lines.append(f"{pad}if {condition}:")
+        if len(node.input_ports) > 1 and node.input_ports[1].wires:
+            lines.extend(_gen_node(node.input_ports[1].wires[0].src.node, indent + 1, visited))
+        else:
+            lines.append(f"{pad}    pass")
+        if len(node.input_ports) > 2 and node.input_ports[2].wires:
+            lines.append(f"{pad}else:")
+            lines.extend(_gen_node(node.input_ports[2].wires[0].src.node, indent + 1, visited))
+        return lines
+
     # ── sequence: run each input branch in port order ─────────────────────────
     if nid == "sequence":
         lines: list[str] = []

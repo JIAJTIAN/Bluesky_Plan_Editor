@@ -27,3 +27,4 @@ class NodeSchema:
     expand_output_ports: bool = False  # True → one output port per param_pair row
     hidden:              bool = False  # True → not shown in palette (auto-created nodes)
     title_param:         str  = ""    # if set, use params[title_param] as the header title
+    inline_pairs:        bool = False  # True → render each param_pair as one row (two side-by-side fields)

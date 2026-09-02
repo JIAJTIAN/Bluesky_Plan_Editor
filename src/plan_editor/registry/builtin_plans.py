@@ -82,9 +82,9 @@ BUILTIN_NODES: list[NodeSchema] = [
         outputs=[PortSpec("out", "plan")],
         params={"motor_0": "", "pos_0": 0.0},
         param_pairs=("motor", "pos"),
+        inline_pairs=True,
         param_choices={"motor": SIM_MOTORS},
-        value_inputs=("positions",),
-        desc="Move motors to absolute positions. Wire a value node → positions to override inline fields, or type motor/position pairs directly.",
+        desc="Move motors to absolute positions. Each row is one motor + target position. Use + / − to add or remove motors.",
     ),
     NodeSchema(
         node_id="mvr",
@@ -94,9 +94,9 @@ BUILTIN_NODES: list[NodeSchema] = [
         outputs=[PortSpec("out", "plan")],
         params={"motor_0": "", "delta_0": 0.0},
         param_pairs=("motor", "delta"),
+        inline_pairs=True,
         param_choices={"motor": SIM_MOTORS},
-        value_inputs=("positions",),
-        desc="Move motors by relative offsets. Wire a value node → positions to override inline fields, or type motor/delta pairs directly.",
+        desc="Move motors by relative offsets. Each row is one motor + delta. Use + / − to add or remove motors.",
     ),
     NodeSchema(
         node_id="sleep",
@@ -216,6 +216,15 @@ BUILTIN_NODES: list[NodeSchema] = [
     ),
 
     # ── Composition nodes (take plan inputs, produce plan output) ─────────────
+    NodeSchema(
+        node_id="if_block",
+        title="if / else",
+        category="flow",
+        inputs=[PortSpec("in", "plan"), PortSpec("true ▶", "plan"), PortSpec("false ▶", "plan")],
+        outputs=[PortSpec("out", "plan")],
+        params={"condition": "True"},
+        desc="Conditional branch. Write a Python expression in 'condition'. Wire the plan to run when true to 'true ▶', and optionally wire a plan to 'false ▶' for the else branch.",
+    ),
     NodeSchema(
         node_id="sequence",
         title="sequence",

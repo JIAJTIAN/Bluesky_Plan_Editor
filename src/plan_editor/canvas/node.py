@@ -26,6 +26,11 @@ PARAM_FIELD_X = PARAM_LABEL_W + 6
 PARAM_FIELD_W = NODE_WIDTH - PARAM_FIELD_X - 10
 PARAM_FIELD_H = 18
 
+# ── inline-pair layout (mv / mvr) ─────────────────────────────────────────────
+_INLINE_IDX_W = 18                                         # "1→" prefix width
+_INLINE_GAP   = 3
+_INLINE_FW    = (NODE_WIDTH - _INLINE_IDX_W - _INLINE_GAP * 3 - 10) // 2  # ≈ 91
+
 # ── colours ───────────────────────────────────────────────────────────────────
 NODE_BG         = QColor("#1a1f2e")
 NODE_BORDER     = QColor("#2e3a50")
@@ -170,8 +175,9 @@ class BaseNode(QGraphicsItem):
         self.params: dict = dict(schema.params)
         self.input_ports:  list[Port] = []
         self.output_ports: list[Port] = []
-        self._param_fields: dict[str, QLineEdit] = {}
-        self._expand_proxy: QGraphicsProxyWidget | None = None
+        self._param_fields:   dict[str, QLineEdit]              = {}
+        self._param_proxies:  dict[str, QGraphicsProxyWidget]   = {}
+        self._expand_proxy:   QGraphicsProxyWidget | None       = None
 
         # For param_pairs nodes: how many pairs are currently shown.
         # Count only params whose key matches {pair_key}_{digit} — ignores fixed params.
@@ -298,6 +304,7 @@ class BaseNode(QGraphicsItem):
             if proxy.scene():
                 proxy.scene().removeItem(proxy)
         self._param_fields.clear()
+        self._param_proxies.clear()
 
         # Reposition output ports to match current pair count
         if self.schema.expand_output_ports:
@@ -349,6 +356,8 @@ class BaseNode(QGraphicsItem):
                         and k.rsplit("_", 1)[0] in pair_keys)]
 
     def _param_row_count(self) -> int:
+        if self.schema.inline_pairs:
+            return self._num_pairs + len(self._fixed_params())
         if self.schema.param_pairs:
             return self._num_pairs * len(self.schema.param_pairs) + len(self._fixed_params())
         return len(self.params)
@@ -412,7 +421,20 @@ class BaseNode(QGraphicsItem):
     def _build_param_widgets(self):
         param_top = self._param_top()
 
-        if self.schema.param_pairs:
+        if self.schema.inline_pairs:
+            # One row per pair: [idx→] [motor___] [pos/delta___]
+            keys = self.schema.param_pairs
+            for i in range(self._num_pairs):
+                k0 = f"{keys[0]}_{i}"
+                k1 = f"{keys[1]}_{i}"
+                x0 = _INLINE_IDX_W + _INLINE_GAP
+                x1 = x0 + _INLINE_FW + _INLINE_GAP
+                self._make_field(k0, str(self.params.get(k0, "")), param_top, i, x=x0, w=_INLINE_FW)
+                self._make_field(k1, str(self.params.get(k1, "")), param_top, i, x=x1, w=_INLINE_FW)
+            for fi, key in enumerate(self._fixed_params()):
+                self._make_field(key, str(self.params.get(key, "")), param_top, self._num_pairs + fi)
+
+        elif self.schema.param_pairs:
             keys = self.schema.param_pairs
             row = 0
             for i in range(self._num_pairs):
@@ -430,8 +452,11 @@ class BaseNode(QGraphicsItem):
                 val = self.params.get(key, "")
                 self._make_field(key, str(val), param_top, row)
 
-    def _make_field(self, key: str, value: str, param_top: float, row: int):
+    def _make_field(self, key: str, value: str, param_top: float, row: int,
+                    x: float | None = None, w: float | None = None):
         y = param_top + row * PARAM_ROW_H + (PARAM_ROW_H - PARAM_FIELD_H) / 2
+        fx = x if x is not None else PARAM_FIELD_X
+        fw = w if w is not None else PARAM_FIELD_W
         base_key = re.sub(r'_\d+$', '', key)
         choices = self.schema.param_choices.get(key) or self.schema.param_choices.get(base_key)
         widget = _DeviceLineEdit(list(choices), value) if choices else QLineEdit(value)
@@ -441,10 +466,29 @@ class BaseNode(QGraphicsItem):
         widget.editingFinished.connect(self._make_commit(key, widget))
         proxy = QGraphicsProxyWidget(self)
         proxy.setWidget(widget)
-        proxy.setPos(PARAM_FIELD_X, y)
-        proxy.resize(PARAM_FIELD_W, PARAM_FIELD_H)
+        proxy.setPos(fx, y)
+        proxy.resize(fw, PARAM_FIELD_H)
         proxy.setZValue(3)
-        self._param_fields[key] = widget
+        self._param_fields[key]  = widget
+        self._param_proxies[key] = proxy
+        self._update_field_visibility(key, proxy)
+
+    def _port_for_param(self, key: str):
+        """Return the wired value port that controls this param, if any."""
+        base = re.sub(r'_\d+$', '', key)
+        for p in self.input_ports:
+            if p.port_type == "value" and (p.name == base or p.name.startswith(base)):
+                return p
+        return None
+
+    def _update_field_visibility(self, key: str, proxy: "QGraphicsProxyWidget"):
+        port = self._port_for_param(key)
+        if port is not None:
+            proxy.setVisible(not bool(port.wires))
+
+    def _refresh_field_visibility(self):
+        for key, proxy in self._param_proxies.items():
+            self._update_field_visibility(key, proxy)
 
     def _build_expand_button(self):
         container = QWidget()
@@ -585,6 +629,7 @@ class BaseNode(QGraphicsItem):
 
     # ── called by Wire on connect / disconnect ────────────────────────────────
     def update_widgets(self):
+        self._refresh_field_visibility()
         self.update()
 
     # ── paint ─────────────────────────────────────────────────────────────────
@@ -701,7 +746,31 @@ class BaseNode(QGraphicsItem):
         param_top = self._param_top()
         painter.setFont(_LABEL_FONT)
 
-        if self.schema.param_pairs:
+        if self.schema.inline_pairs:
+            # One row per pair — draw "i→" index prefix only
+            for i in range(self._num_pairs):
+                y = param_top + i * PARAM_ROW_H
+                painter.setPen(QColor("#64748b"))
+                painter.drawText(
+                    QRectF(4, y, _INLINE_IDX_W, PARAM_ROW_H),
+                    Qt.AlignVCenter | Qt.AlignLeft,
+                    f"{i + 1}→",
+                )
+            fixed = self._fixed_params()
+            if fixed:
+                sep_y = param_top + self._num_pairs * PARAM_ROW_H - 2
+                painter.setPen(QPen(QColor("#1e2535"), 1, Qt.DotLine))
+                painter.drawLine(QPointF(8, sep_y), QPointF(NODE_WIDTH - 8, sep_y))
+                painter.setPen(QColor("#64748b"))
+                for fi, key in enumerate(fixed):
+                    y = param_top + (self._num_pairs + fi) * PARAM_ROW_H
+                    painter.drawText(
+                        QRectF(8, y, PARAM_LABEL_W - 4, PARAM_ROW_H),
+                        Qt.AlignVCenter | Qt.AlignLeft,
+                        key + ":",
+                    )
+
+        elif self.schema.param_pairs:
             keys = self.schema.param_pairs
             n_keys = len(keys)
             for i in range(self._num_pairs):
@@ -718,7 +787,6 @@ class BaseNode(QGraphicsItem):
                         Qt.AlignVCenter | Qt.AlignLeft,
                         f"{key} {i + 1}:",
                     )
-            # fixed params below pairs — draw a separator line then labels
             fixed = self._fixed_params()
             if fixed:
                 pair_rows = self._num_pairs * n_keys
