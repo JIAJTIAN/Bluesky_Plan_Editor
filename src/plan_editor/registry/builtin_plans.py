@@ -232,8 +232,8 @@ BUILTIN_NODES: list[NodeSchema] = [
             PortSpec("true out",  "plan"),   # continuation after the true branch
             PortSpec("false out", "plan"),   # continuation after the false branch
         ],
-        params={"operator": "==", "threshold": "0"},
-        param_choices={"operator": ["==", ">", "<", ">=", "<=", "!="]},
+        params={"operator": "==", "threshold": ""},
+        param_choices={"operator": ["==", "!=", ">", "<", ">=", "<=", "is", "is not"]},
         desc=(
             "Conditional branch. Wire a value node (e.g. loop variable) to 'condition', "
             "choose an operator, and enter a threshold. "
