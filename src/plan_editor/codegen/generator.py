@@ -40,13 +40,40 @@ def generate_plan_code(scene) -> str:
         return "# Add a 'Run / Export' node to the canvas to see generated code."
 
     lines = [_IMPORTS, "def my_plan():"]
+    lines.append(_build_docstring(nodes))
     if sink.input_ports and sink.input_ports[0].wires:
-        src_node = sink.input_ports[0].wires[0].src.node
-        lines.extend(_gen_item(src_node, indent=1, visited=frozenset()))
+        # Discover which port on the source the wire came from — could be true/false out
+        wire = sink.input_ports[0].wires[0]
+        src_node = wire.src.node
+        # If the source is an if_block output port, generate the if_block directly
+        if src_node.schema.node_id == "if_block":
+            lines.extend(_gen_node(src_node, indent=1, visited=frozenset()))
+        else:
+            lines.extend(_gen_item(src_node, indent=1, visited=frozenset()))
     else:
         lines.append("    pass  # connect a plan to the Run / Export node")
 
     return "\n".join(lines)
+
+
+def _build_docstring(nodes) -> str:
+    """Build a short docstring listing visible nodes and their active parameters."""
+    skip = {"plan_output", "loop_var"}
+    entries = []
+    for n in nodes:
+        if n.schema.hidden or n.schema.node_id in skip:
+            continue
+        key_params = [
+            f"{k}={v!r}"
+            for k, v in list(n.params.items())[:4]
+            if v != "" and v != 0 and v != 0.0 and v is not False
+        ]
+        param_str = ", ".join(key_params)
+        entries.append(f"      {n.schema.title}" + (f"  [{param_str}]" if param_str else ""))
+    if not entries:
+        return '    """Auto-generated Bluesky plan."""'
+    body = "\n".join(entries)
+    return f'    """Auto-generated Bluesky plan.\n\n    Nodes:\n{body}\n    """'
 
 
 # ── dispatch ──────────────────────────────────────────────────────────────────
@@ -158,18 +185,53 @@ def _gen_node(node, indent: int, visited: frozenset) -> list[str]:
 
     # ── if / else block ───────────────────────────────────────────────────────
     if nid == "if_block":
-        condition = str(p.get("condition", "True")).strip()
         lines: list[str] = []
-        if node.input_ports and node.input_ports[0].wires:
-            lines.extend(_gen_item(node.input_ports[0].wires[0].src.node, indent, visited))
-        lines.append(f"{pad}if {condition}:")
-        if len(node.input_ports) > 1 and node.input_ports[1].wires:
-            lines.extend(_gen_node(node.input_ports[1].wires[0].src.node, indent + 1, visited))
+        # Emit upstream node (plan in-port)
+        in_port = next((pt for pt in node.input_ports if pt.name == "in"), None)
+        if in_port and in_port.wires:
+            lines.extend(_gen_item(in_port.wires[0].src.node, indent, visited))
+
+        # Build condition string from value port + operator + threshold
+        cond_port = next((pt for pt in node.input_ports if pt.port_type == "value"), None)
+        if cond_port and cond_port.wires:
+            left = _node_value_from_port(cond_port.wires[0].src)
+        else:
+            left = "True"
+        op     = str(p.get("operator",  "==")).strip()
+        thresh = str(p.get("threshold", "0")).strip()
+        cond_str = f"{left} {op} {thresh}" if thresh and left != "True" else left
+
+        lines.append(f"{pad}if {cond_str}:")
+
+        # True body
+        true_body = next((pt for pt in node.input_ports if pt.name == "true ▶"), None)
+        if true_body and true_body.wires:
+            lines.extend(_gen_node(true_body.wires[0].src.node, indent + 1, visited))
         else:
             lines.append(f"{pad}    pass")
-        if len(node.input_ports) > 2 and node.input_ports[2].wires:
+
+        # True out continuation (forward chain from the true out port)
+        true_out = next((pt for pt in node.output_ports if pt.name == "true out"), None)
+        if true_out and true_out.wires:
+            dst = true_out.wires[0].dst.node
+            if dst.schema.node_id != "plan_output":
+                lines.extend(_gen_body_chain(dst, indent + 1, visited))
+
+        # False body + continuation (only emit else if either is connected)
+        false_body = next((pt for pt in node.input_ports if pt.name == "false ▶"), None)
+        false_out  = next((pt for pt in node.output_ports if pt.name == "false out"), None)
+        has_false  = (false_body and false_body.wires) or (false_out and false_out.wires)
+        if has_false:
             lines.append(f"{pad}else:")
-            lines.extend(_gen_node(node.input_ports[2].wires[0].src.node, indent + 1, visited))
+            if false_body and false_body.wires:
+                lines.extend(_gen_node(false_body.wires[0].src.node, indent + 1, visited))
+            if false_out and false_out.wires:
+                dst = false_out.wires[0].dst.node
+                if dst.schema.node_id != "plan_output":
+                    lines.extend(_gen_body_chain(dst, indent + 1, visited))
+            if not has_false:
+                lines.append(f"{pad}    pass")
+
         return lines
 
     # ── sequence: run each input branch in port order ─────────────────────────

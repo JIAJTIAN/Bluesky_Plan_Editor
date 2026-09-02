@@ -222,10 +222,24 @@ BUILTIN_NODES: list[NodeSchema] = [
         node_id="if_block",
         title="if / else",
         category="flow",
-        inputs=[PortSpec("in", "plan"), PortSpec("true ▶", "plan"), PortSpec("false ▶", "plan")],
-        outputs=[PortSpec("out", "plan")],
-        params={"condition": "True"},
-        desc="Conditional branch. Write a Python expression in 'condition'. Wire the plan to run when true to 'true ▶', and optionally wire a plan to 'false ▶' for the else branch.",
+        inputs=[
+            PortSpec("in",        "plan"),
+            PortSpec("condition", "value"),   # wire a loop_var, sensor reading, etc.
+            PortSpec("true ▶",   "plan"),    # plan body when condition is true
+            PortSpec("false ▶",  "plan"),    # plan body when condition is false
+        ],
+        outputs=[
+            PortSpec("true out",  "plan"),   # continuation after the true branch
+            PortSpec("false out", "plan"),   # continuation after the false branch
+        ],
+        params={"operator": "==", "threshold": "0"},
+        param_choices={"operator": ["==", ">", "<", ">=", "<=", "!="]},
+        desc=(
+            "Conditional branch. Wire a value node (e.g. loop variable) to 'condition', "
+            "choose an operator, and enter a threshold. "
+            "Wire plan bodies to 'true ▶' / 'false ▶'. "
+            "Continue each branch from 'true out' / 'false out'."
+        ),
     ),
     NodeSchema(
         node_id="sequence",
